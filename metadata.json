@@ -1,0 +1,9 @@
+{
+  "name": "iPad Tutor",
+  "description": "A real-time AI math tutor that sees your screen and talks to you using Gemini Live API.",
+  "requestFramePermissions": [
+    "microphone",
+    "camera",
+    "display-capture"
+  ]
+}
