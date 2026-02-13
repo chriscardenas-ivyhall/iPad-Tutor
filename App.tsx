@@ -1,15 +1,14 @@
-
 import React, { useState, useRef, useCallback } from 'react';
 import { GoogleGenAI, Modality, LiveServerMessage } from '@google/genai';
-import { AUDIO_CONFIG } from './types';
-import { decode, decodeAudioData, createBlob } from './utils/audio-processing';
+import { AUDIO_CONFIG } from './types.ts';
+import { decode, decodeAudioData, createBlob } from './utils/audio-processing.ts';
 
 const FRAME_RATE = 2; 
 const JPEG_QUALITY = 0.4;
 
 const App: React.FC = () => {
   const [isActive, setIsActive] = useState(false);
-  const [status, setStatus] = useState<string>('Ready');
+  const [status, setStatus] = useState<string>('System Idle');
   const [error, setError] = useState<string | null>(null);
 
   const audioContextRef = useRef<{
@@ -24,10 +23,9 @@ const App: React.FC = () => {
   const sourcesRef = useRef<Set<AudioBufferSourceNode>>(new Set());
   const frameIntervalRef = useRef<number | null>(null);
 
-  // Stop the session and clean up all media and audio resources
   const stopSession = useCallback(() => {
     setIsActive(false);
-    setStatus('Ready');
+    setStatus('System Idle');
     if (frameIntervalRef.current) {
       window.clearInterval(frameIntervalRef.current);
       frameIntervalRef.current = null;
@@ -52,29 +50,37 @@ const App: React.FC = () => {
     nextStartTimeRef.current = 0;
   }, []);
 
-  // Initialize and start the tutor session with screen share and mic
   const startTutor = async () => {
-    // API key must be accessed directly from process.env.API_KEY
-    const apiKey = process.env.API_KEY;
+    const apiKey = (window as any).process?.env?.API_KEY || process.env.API_KEY;
+    
     if (!apiKey) {
-      setError("API Key not found. Please ensure process.env.API_KEY is configured.");
+      setError("Critical Error: API Key is missing. Check environment configuration.");
       return;
     }
 
     try {
       setError(null);
+      setStatus('Initializing Media...');
+      
       const nav = navigator as any;
       const getDisplayMedia = (nav.mediaDevices?.getDisplayMedia?.bind(nav.mediaDevices)) || (nav.getDisplayMedia?.bind(nav));
 
       if (!getDisplayMedia) {
-        throw new Error("Screen sharing is not supported in this browser or context.");
+        throw new Error("Screen sharing is not supported on this device/browser.");
       }
 
-      setStatus('Accessing Screen...');
-      const screenStream = await getDisplayMedia({ video: true, audio: false });
+      const screenStream = await getDisplayMedia({ 
+        video: { cursor: "always" }, 
+        audio: false 
+      });
 
-      setStatus('Accessing Mic...');
-      const micStream = await navigator.mediaDevices.getUserMedia({ audio: true });
+      const micStream = await navigator.mediaDevices.getUserMedia({ 
+        audio: {
+          echoCancellation: true,
+          noiseSuppression: true,
+          autoGainControl: true
+        } 
+      });
 
       streamsRef.current = { mic: micStream, screen: screenStream };
       screenStream.getVideoTracks()[0].onended = () => stopSession();
@@ -95,29 +101,26 @@ const App: React.FC = () => {
       const canvasEl = document.createElement('canvas');
       const ctx = canvasEl.getContext('2d', { alpha: false });
 
-      // Create a fresh instance for the connection
-      const ai = new GoogleGenAI({ apiKey: process.env.API_KEY });
-      setStatus('Connecting to Gemini...');
+      const ai = new GoogleGenAI({ apiKey });
+      setStatus('Establishing Neural Link...');
       
       const sessionPromise = ai.live.connect({
         model: 'gemini-2.5-flash-native-audio-preview-12-2025',
         config: {
           responseModalities: [Modality.AUDIO],
           speechConfig: { voiceConfig: { prebuiltVoiceConfig: { voiceName: 'Kore' } } },
-          systemInstruction: 'You are a helpful tutor who can see the user screen. Talk to them naturally.',
+          systemInstruction: 'You are a brilliant, empathetic iPad tutor. You see the user\'s screen. Help them with whatever task they are doing by observing their screen and speaking to them. Keep responses concise and helpful.',
         },
         callbacks: {
           onopen: () => {
-            setStatus('Connected');
+            setStatus('Neural Link Active');
             setIsActive(true);
             
-            // Handle microphone input streaming
             const source = inputCtx.createMediaStreamSource(micStream);
             const scriptProcessor = inputCtx.createScriptProcessor(4096, 1, 1);
             scriptProcessor.onaudioprocess = (e) => {
               const inputData = e.inputBuffer.getChannelData(0);
               const pcmBlob = createBlob(inputData);
-              // Use sessionPromise to prevent race conditions
               sessionPromise.then((session) => {
                 session.sendRealtimeInput({ media: pcmBlob });
               });
@@ -125,12 +128,12 @@ const App: React.FC = () => {
             source.connect(scriptProcessor);
             scriptProcessor.connect(inputCtx.destination);
 
-            // Handle video frame streaming from screen share
             frameIntervalRef.current = window.setInterval(() => {
               if (videoEl && canvasEl && ctx) {
-                canvasEl.width = videoEl.videoWidth;
-                canvasEl.height = videoEl.videoHeight;
-                ctx.drawImage(videoEl, 0, 0, videoEl.videoWidth, videoEl.videoHeight);
+                const scale = 0.5; // Scale down to save bandwidth
+                canvasEl.width = videoEl.videoWidth * scale;
+                canvasEl.height = videoEl.videoHeight * scale;
+                ctx.drawImage(videoEl, 0, 0, canvasEl.width, canvasEl.height);
                 canvasEl.toBlob(
                   async (blob) => {
                     if (blob) {
@@ -155,7 +158,6 @@ const App: React.FC = () => {
             }, 1000 / FRAME_RATE);
           },
           onmessage: async (message: LiveServerMessage) => {
-            // Process audio data from Gemini
             const base64EncodedAudioString =
               message.serverContent?.modelTurn?.parts?.[0]?.inlineData?.data;
             if (base64EncodedAudioString) {
@@ -181,7 +183,6 @@ const App: React.FC = () => {
               sourcesRef.current.add(source);
             }
 
-            // Handle model interruptions
             const interrupted = message.serverContent?.interrupted;
             if (interrupted) {
               for (const source of sourcesRef.current.values()) {
@@ -193,81 +194,73 @@ const App: React.FC = () => {
           },
           onerror: (e: any) => {
             console.error('Gemini Live API Error:', e);
-            setError('A connection error occurred with the Gemini API.');
+            setError('The neural link was severed. Please try again.');
             stopSession();
           },
           onclose: () => {
-            console.log('Gemini Live API Connection closed');
             stopSession();
           },
         },
       });
     } catch (err: any) {
       console.error(err);
-      setError(err.message || 'Failed to start the tutor session.');
+      setError(err.message || 'Connection failed.');
       stopSession();
     }
   };
 
   return (
-    <div style={{ padding: '20px', fontFamily: 'system-ui, -apple-system, sans-serif', maxWidth: '800px', margin: '0 auto' }}>
-      <h1>Gemini Live Tutor</h1>
-      <div style={{ marginBottom: '20px', padding: '10px', borderRadius: '4px', background: isActive ? '#e6fffa' : '#f7fafc', border: '1px solid #cbd5e0' }}>
-        Status: <strong>{status}</strong>
-      </div>
-      
-      {error && (
-        <div style={{ color: '#c53030', backgroundColor: '#fff5f5', padding: '15px', borderRadius: '4px', marginBottom: '20px', border: '1px solid #feb2b2' }}>
-          {error}
-        </div>
-      )}
-      
-      {!isActive ? (
-        <button 
-          onClick={startTutor} 
-          style={{ 
-            padding: '12px 24px', 
-            fontSize: '18px', 
-            cursor: 'pointer', 
-            backgroundColor: '#3182ce', 
-            color: 'white', 
-            border: 'none', 
-            borderRadius: '6px',
-            fontWeight: 'bold'
-          }}
-        >
-          Start Tutor Session
-        </button>
-      ) : (
-        <button 
-          onClick={stopSession} 
-          style={{ 
-            padding: '12px 24px', 
-            fontSize: '18px', 
-            cursor: 'pointer', 
-            backgroundColor: '#e53e3e', 
-            color: 'white', 
-            border: 'none', 
-            borderRadius: '6px',
-            fontWeight: 'bold'
-          }}
-        >
-          Stop Session
-        </button>
-      )}
+    <div className="flex flex-col items-center justify-center min-h-screen p-8 text-center bg-slate-950">
+      <div className="w-full max-w-lg space-y-12">
+        <header className="space-y-4">
+          <div className="inline-block px-4 py-1.5 mb-2 text-[10px] font-black tracking-[0.3em] uppercase bg-indigo-500/10 text-indigo-400 border border-indigo-500/20 rounded-full">
+            Gemini 2.5 Live
+          </div>
+          <h1 className="text-5xl font-black italic tracking-tighter text-white uppercase sm:text-7xl">
+            iPad <span className="text-indigo-500">Tutor</span>
+          </h1>
+          <p className="text-lg font-medium text-slate-400">
+            {isActive 
+              ? "Tutor is currently viewing your screen and listening." 
+              : "Experience real-time visual assistance with Gemini."}
+          </p>
+        </header>
 
-      <div style={{ marginTop: '40px', borderTop: '1px solid #eee', paddingTop: '20px' }}>
-        <h3>Instructions:</h3>
-        <ol style={{ lineHeight: '1.6' }}>
-          <li>Click "Start Tutor Session".</li>
-          <li>Choose a screen, window, or tab to share.</li>
-          <li>Allow microphone access when prompted.</li>
-          <li>Talk to Gemini! It can see your shared screen and assist you in real-time.</li>
-        </ol>
+        <div className="relative group">
+          {/* Dynamic Glow Effect */}
+          <div className={`absolute -inset-4 rounded-full blur-2xl transition-all duration-1000 opacity-20 group-hover:opacity-40 
+            ${isActive ? 'bg-rose-500 animate-pulse' : 'bg-indigo-500'}`}></div>
+          
+          <button
+            onClick={isActive ? stopSession : startTutor}
+            className={`relative flex flex-col items-center justify-center w-64 h-64 mx-auto transition-all duration-500 rounded-full border-4 active:scale-95 shadow-2xl
+              ${isActive 
+                ? 'bg-rose-600 border-rose-400 shadow-rose-900/50' 
+                : 'bg-indigo-600 border-indigo-400 shadow-indigo-900/50 hover:bg-indigo-500'}`}
+          >
+            <span className="text-4xl font-black tracking-tighter text-white uppercase italic">
+              {isActive ? 'Stop' : 'Start'}
+            </span>
+            <span className="mt-2 text-[10px] font-bold tracking-widest uppercase opacity-70">
+              {status}
+            </span>
+          </button>
+        </div>
+
+        {error && (
+          <div className="p-4 border border-rose-500/30 bg-rose-500/10 rounded-2xl animate-in fade-in slide-in-from-bottom-4">
+            <p className="text-sm font-bold text-rose-400">{error}</p>
+          </div>
+        )}
+
+        <footer className="pt-12">
+          <p className="text-[10px] font-bold tracking-[0.4em] uppercase text-slate-600">
+            Secure Context Required &bull; Full Screen Capture
+          </p>
+        </footer>
       </div>
     </div>
   );
 };
 
-// Exporting as default to fix module import error in index.tsx
 export default App;

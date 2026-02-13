@@ -3,25 +3,52 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Gemini Live Math Tutor</title>
+    <title>iPad Tutor | Gemini Live</title>
     <script src="https://cdn.tailwindcss.com"></script>
     <link rel="preconnect" href="https://fonts.googleapis.com">
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;600;700&display=swap" rel="stylesheet">
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;700;900&display=swap" rel="stylesheet">
     <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
     <style>
         body {
             font-family: 'Inter', sans-serif;
-            background-color: #0f172a;
+            background-color: #020617;
             color: white;
             margin: 0;
             padding: 0;
+            overflow: hidden;
         }
         #root {
             height: 100vh;
             width: 100vw;
         }
+        /* Hide the root until React takes over */
+        #root:empty {
+            display: flex;
+            align-items: center;
+            justify-content: center;
+        }
+        #root:empty::after {
+            content: "Loading Tutor...";
+            font-weight: 900;
+            text-transform: uppercase;
+            letter-spacing: 0.2em;
+            opacity: 0.5;
+            animation: pulse 2s cubic-bezier(0.4, 0, 0.6, 1) infinite;
+        }
+        @keyframes pulse {
+            0%, 100% { opacity: 0.5; }
+            50% { opacity: 0.2; }
+        }
     </style>
+    <script>
+        // Polyfill for process.env to prevent ReferenceErrors in browser environments
+        window.process = {
+            env: {
+                API_KEY: "" // This will be injected by the environment or replaced at runtime
+            }
+        };
+    </script>
 <script type="importmap">
 {
   "imports": {
